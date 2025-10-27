@@ -8,11 +8,11 @@ import math
 from scipy.stats import norm
 
 class StandardThreeLayerDNN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, in_features, hidden_size, out_features):
         super(StandardThreeLayerDNN, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc1 = nn.Linear(in_features, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, output_size)
+        self.fc3 = nn.Linear(hidden_size, out_features)
         self.relu = nn.ReLU()
         
     def forward(self, x):
@@ -25,9 +25,9 @@ class StandardThreeLayerDNN(nn.Module):
         return torch.nn.functional.softmax(self.forward(x), dim=1)
         
 class SingleLayerNetwork(torch.nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, in_features, hidden_size, out_features):
         super(StandardThreeLayerDNN, self).__init__()
-        self.fc1 = nn.Linear(input_size, output_size)
+        self.fc1 = nn.Linear(in_features, out_features)
         self.relu = nn.ReLU()
         
     def forward(self, x):
@@ -73,36 +73,38 @@ class RandomFeatureGaussianProcess(torch.nn.Module):
         precision_CRR = torch.eye(self.rank, device=device).unsqueeze(0).repeat(self.out_features, 1, 1)
         self.precision_mat = precision_CRR
     
-    def compute_batch_covariance(self, h):
+
+    def compute_batch_precision_update(self, h_batch):
+        device = self.precision_mat.device
+
+        # Make sure we're on same device
+        h_batch = h_batch.to(device)
+
         ## CALCULATE FEATURES (DIMENSIONS)
-        features = self.featurize(h)
+        phi_NR = self.featurize(h_batch)         # shape (N, rank)
 
-        ## IN OUR CASE THIS IS EQUIVALENT TO NUMBER OF TRAINING DATAPOINTS
-        batch_size = features.shape[0]
-        
         ## CALCULATE SOFTMAX PROBABILITIES FROM FEATURES
-        logits = self.linear(features)
+        logits_NC = self.linear(phi_NR)          # (N, C)
+        probs_NC = F.softmax(logits_NC, dim=1)   # (N, C)
 
-        probs = F.softmax(logits, dim=1)
-        
-        ## CREATE IDENTITY MATRIX OF DIMENSIONS CxRankxRank
-        cov_inv = self.precision_mat
-        
-        for i in range(batch_size):
+        ## FETCH CURRENT PRECISION MATRIX
+        cov_inv_CRR = self.precision_mat        # (C, rank, rank)
+        N = phi_NR.shape[0]
+
+        for i in range(N):
             ## RE-ORIENT DIMENSIONS OF FEATURES TO CREATE PHI FROM SNGP PAPER
-            phi_i = features[i].unsqueeze(1)
+            phi_i_R1 = phi_NR[i].unsqueeze(1)    # (rank, 1)
 
             ## CREATE OUTER CALCULATION
-            outer_product = phi_i @ phi_i.t()
+            outer_RR = phi_i_R1 @ phi_i_R1.t()   # (rank, rank)
 
             ## CREATE INNER CALCULATION
-            inner_calc = probs[i] * (1 - probs[i])
+            var_C = probs_NC[i] * (1.0 - probs_NC[i])  # (C,)
 
             ## MULTIPLY THE TWO TOGETHER
-            cov_inv += inner_calc.view(self.out_features, 1, 1) * outer_product.unsqueeze(0)
+            cov_inv_CRR = cov_inv_CRR + var_C.view(self.out_features, 1, 1) * outer_RR.unsqueeze(0)
 
-        ## UPDATE COVARIANCE MATRIX
-        self.precision_inv_mat = cov_inv
+        self.precision_mat = cov_inv_CRR
         
     
     def invert_covariance(self, device='cpu'):
@@ -206,10 +208,10 @@ class ResidualBlock(nn.Module):
     
 
 class ResFFN12_128(nn.Module):
-    def __init__(self, input_size, output_size, dropout_rate=0.01):
+    def __init__(self, in_features, out_features, dropout_rate=0.01):
         super().__init__()
         hidden_size = 128
-        fc_in = nn.Linear(input_size, hidden_size)
+        fc_in = nn.Linear(in_features, hidden_size)
         self.fc_in = fc_in
         
         self.relu = nn.ReLU()
@@ -217,7 +219,7 @@ class ResFFN12_128(nn.Module):
             ResidualBlock(hidden_size, dropout_rate) 
             for _ in range(12)
         ])
-        self.fc_out = nn.Linear(hidden_size, output_size)
+        self.fc_out = nn.Linear(hidden_size, out_features)
     
     def forward(self, x):
         x = self.fc_in(x)
@@ -232,11 +234,11 @@ class ResFFN12_128(nn.Module):
     
 
 class SNGP_ResFFN12_128(nn.Module):
-    def __init__(self, input_size, output_size, lengthscale=0.4, outputscale=5.0, rank=512, dropout_rate=0.01):
+    def __init__(self, in_features, out_features, lengthscale=0.25, outputscale=1.0, rank=1_024, dropout_rate=0.01):
         super().__init__()
         hidden_size = 128
         
-        fc_in = nn.Linear(input_size, hidden_size)
+        fc_in = nn.Linear(in_features, hidden_size)
         self.fc_in = fc_in
         
         self.relu = nn.ReLU()
@@ -248,7 +250,7 @@ class SNGP_ResFFN12_128(nn.Module):
         
         self.gp = RandomFeatureGaussianProcess(
             in_features=hidden_size,
-            out_features=output_size,
+            out_features=out_features,
             learnable_lengthscale=False,
             learnable_outputscale=False,
             lengthscale=lengthscale,
@@ -261,6 +263,25 @@ class SNGP_ResFFN12_128(nn.Module):
         x = self.res_blocks(x)
         logits = self.gp(x)
         return logits
+
+    def reinitialize_precision(self, device='cpu'):
+        self.gp.reinitialize_precision(device=device)
+
+    def update_precision_from_loader(self, train_loader, device='cpu'):
+        self.eval()
+        self.to(device)
+
+        with torch.no_grad():
+            for batch in train_loader:
+                X = batch[0].to(device)
+                h = self.fc_in(X)
+                h = self.relu(h)
+                h = self.res_blocks(h)
+                self.gp.compute_batch_precision_update(h)
+
+
+    def invert_covariance(self, device='cpu'):
+        return self.gp.invert_covariance(device=device)
 
     def predict_proba(self, x, covariance, num_samples=100):
         x = self.fc_in(x)

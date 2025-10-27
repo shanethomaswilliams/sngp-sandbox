@@ -41,7 +41,7 @@ def train_model(model, device, tr_loader, va_loader, loss_module, optimizer=None
 
     # Allocate lists for tracking progress each epoch
     tr_info = {'xent':[], 'err':[], 'loss':[]}
-    va_info = {'xent':[], 'err':[]}
+    va_info = {'xent':[], 'err':[], 'loss':[]}
     epochs = []
 
     # Init vars needed for early stopping
@@ -100,25 +100,51 @@ def train_model(model, device, tr_loader, va_loader, loss_module, optimizer=None
         # Track performance on val set
         with torch.no_grad():
             model.eval() # In EVAL mode
+            va_total_loss = 0.0
             va_xent = 0.0
             va_err = 0
+            num_seen_valid = 0
+            num_batches_valid = 0
             for xva_BF, yva_B in va_loader:
-                logits_BC = model(xva_BF.to(device))
-                va_xent += loss_module.calc_xent_loss_base2(
-                    logits_BC, yva_B.to(device),
-                    reduction='sum').item()
+                xva_BF = xva_BF.to(device)
+                yva_B = yva_B.to(device)
+                logits_BC = model(xva_BF)
+
+                va_loss_xent = loss_module.calc_labeled_loss_for_batch(
+                    logits_BC, yva_B
+                )  # scalar CE on this batch
+
+                # same L2 penalty on *current model params* (not frozen params)
+                params = flatten_params(model)
+                l2_loss = l2pen_mag * torch.sum(params ** 2)
+
+                # same total objective structure
+                va_loss_total = va_loss_xent + float(l2pen_mag) / n_valid * l2_loss
+
+                # bookkeeping
+                batch_size = yva_B.shape[0]
+                num_seen_valid += batch_size
+                num_batches_valid += 1
+
+                va_total_loss += va_loss_total.item()
+                va_xent += va_loss_xent.item()
+
                 va_err += metrics.zero_one_loss(
-                    logits_BC.argmax(axis=1).detach().cpu().numpy(),
-                    yva_B, normalize=False)
-            va_xent = va_xent / n_valid
-            va_err_rate = va_err / n_valid
+                    logits_BC.argmax(dim=1).detach().cpu().numpy(),
+                    yva_B.detach().cpu().numpy(),
+                    normalize=False,
+                )
+            va_avg_total_loss = va_total_loss / num_batches_valid
+            va_avg_xent = va_xent / num_batches_valid
+            va_err_rate = va_err / num_seen_valid
 
         # Update diagnostics and progress bar
         epochs.append(epoch)
         tr_info['loss'].append(tr_loss)
         tr_info['xent'].append(tr_xent)
-        tr_info['err'].append(tr_err_rate)        
-        va_info['xent'].append(va_xent)
+        tr_info['err'].append(tr_err_rate)     
+        va_info['loss'].append(va_avg_total_loss)   
+        va_info['xent'].append(va_avg_xent)
         va_info['err'].append(va_err_rate)
         pbar_info.update({
             "tr_xent": tr_xent, "tr_err": tr_err_rate,

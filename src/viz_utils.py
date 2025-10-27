@@ -85,9 +85,12 @@ def display_data_splits(train_loader, val_loader, test_loader):
 def plot_loss(info):
     epochs = info['epochs']
     loss = info['tr']['loss']
+    val_loss = info['va']['loss']
+    print(info)
     
     plt.figure(figsize=(8, 6))
-    plt.plot(epochs, loss, marker='o', label="Training Loss")
+    plt.plot(epochs, loss, label="Training Loss")
+    plt.plot(epochs, val_loss, label="Validation Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training Loss Over Epochs")
@@ -134,12 +137,8 @@ def plot_probas_over_dense_grid(
     G = x1_grid.size
     H = x2_grid.size
     
-    # Get regular grid of G x H points, where each point is an (x1, x2) location
     x1_GH, x2_GH = np.meshgrid(x1_grid, x2_grid)
     
-    # Combine the x1 and x2 values into one array
-    # Flattened into M = G x H rows
-    # Each row of x_M2 is a 2D vector [x_m1, x_m2]
     x_M2 = np.hstack([
         x1_GH.flatten()[:,np.newaxis],
         x2_GH.flatten()[:,np.newaxis]]).astype(np.float32)
@@ -246,7 +245,7 @@ def plot_preds(preds_filename, loader, figure_filename, show_fig=False):
 
 
 
-def plot_probabilities_gp(model, train_loader, compute_covariance=True, device='cpu', num_samples=100, filename='plot_probabilities_gp.png'):
+def plot_probabilities_gp(model, train_loader, compute_covariance=True, device='cpu', num_samples=100, preds_path='preds.pt', filename='plot_probabilities_gp.png'):
     X_numpy, y_numpy = src.utils.get_data_from_loader(train_loader)
     
     xx, yy = np.meshgrid(np.arange(-4, 4, 0.05),
@@ -266,7 +265,7 @@ def plot_probabilities_gp(model, train_loader, compute_covariance=True, device='
     preds = torch.cat(preds_list, dim=0)
     class1_preds = preds[:, 1].numpy()
     predictions = class1_preds.reshape(xx.shape)
-    torch.save(preds, 'preds.pt')
+    torch.save(preds, preds_path)
     
     colors = ['#1F77B4', '#5799C7', '#8FBBDA', '#C7DDED', '#FFFFFF',
               '#F5C9CA', '#EB9394', '#E15D5E', '#D62728']
