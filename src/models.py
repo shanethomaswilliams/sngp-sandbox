@@ -23,50 +23,6 @@ class StandardThreeLayerDNN(nn.Module):
     
     def predict_proba(self, x):
         return torch.nn.functional.softmax(self.forward(x), dim=1)
-
-
-class SNGPThreeLayerDNN(nn.Module):
-    def __init__(self, in_features, hidden_size, out_features,
-                 rank=1024, lengthscale=math.sqrt(20.0), outputscale=1.0,
-                 learnable_lengthscale=False, learnable_outputscale=False):
-        super(SNGPThreeLayerDNN, self).__init__()
-        self.fc1 = nn.Linear(in_features, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
-        self.fc3 = nn.Linear(hidden_size, out_features)
-        self.relu = nn.ReLU()
-        self.rank=rank
-        self.out_features=out_features
-        self.gp = RandomFeatureGaussianProcess(
-            in_features=hidden_size,
-            out_features=out_features,
-            learnable_lengthscale=learnable_lengthscale,
-            learnable_outputscale=learnable_outputscale,
-            lengthscale=lengthscale,
-            outputscale=outputscale,
-            rank=rank)
-        
-    def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        ## FC LAYER IN BETWEEN RELU LAYER AND GP (NOT NECESSARILY BUG BUT SOMETHING TO LOOK INTO)
-        logits = self.gp(x)
-        # logits = self.relu(self.fc3(x))
-        return logits
-    
-    def featurize(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        rff_vector = self.gp.featurize(x)
-        return rff_vector
-    
-    def predict_proba(self, x, covariance, num_samples=100):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        proba = self.gp.predict_proba(x, covariance, num_samples=num_samples)
-        return proba
-
-    def standard_proba(self, x):
-        return torch.nn.functional.softmax(self.forward(x))
         
 class SingleLayerNetwork(torch.nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
@@ -158,45 +114,6 @@ class RandomFeatureGaussianProcess(torch.nn.Module):
         covariance_CRR = torch.inverse(self.precision_mat)
         return covariance_CRR
 
-    # def predict_proba(self, h, covariance, num_samples=100):
-    #     ## CALCULAING FEATURES
-    #     features = self.featurize(h)
-
-    #     ## AGAIN, IN OUR CASE THIS IS EQUIVALENT TO THE ENTIRE TRAINING DATASET
-    #     batch_size = features.shape[0]
-        
-    #     ## CALCULATE LOGITS
-    #     mean_logits = self.linear(features)
-        
-    #     ## CREATING OUTLINE FOR VARIANCE TO DO MONTE CARLO SAMPLING
-    #     samples = []
-    #     for k in range(self.out_features):
-            
-    #         ## GET COVARIANCE MATRIX FOR SPECIFIC CLASS
-    #         cov_k = covariance[k]
-            
-    #         ## CALCULATE VARIANCE FOR SPECIFIC CLASS
-    #         var = features @ cov_k @ features.t()
-            
-    #         ## CREATE MULTIVARIATE NORMAL
-    #         ## Guarantee Postive Definiteness
-    #         ## NORMAL DIST FOR CLASSES - MATH WRITEUP
-    #         scale_tril = torch.linalg.cholesky(var + 1e-3 * torch.eye(batch_size))
-    #         mvn_dist = torch.distributions.multivariate_normal.MultivariateNormal(loc=mean_logits[:,k], scale_tril=scale_tril)
-
-    #         ## SAMPLE FROM 
-    #         samples_k = mvn_dist.sample(sample_shape=(num_samples,))
-    #         samples.append(samples_k)     
-        
-    #     ## ALL MONTE CARLO SAMPLES FOR EACH CLASS OF SIZE CxNUM_SAMPLES
-    #     samples = torch.stack(samples, dim=0)
-    #     samples = samples.permute(1, 2, 0)
-
-    #     ## SOFTMAX APPLICATION
-    #     probs_samples = F.softmax(samples, dim=-1)
-
-    #     predictive_proba = torch.mean(probs_samples, dim=0)  
-    #     return predictive_proba
 
     def predict_proba(self, h, covariance, num_samples=100):
         # CALCULAING FEATURES
@@ -286,6 +203,7 @@ class ResidualBlock(nn.Module):
         out = self.dropout(out)
         out = self.relu(out)
         return x + out
+    
 
 class ResFFN12_128(nn.Module):
     def __init__(self, input_size, output_size, dropout_rate=0.01):
@@ -311,6 +229,7 @@ class ResFFN12_128(nn.Module):
     def predict_proba(self, x):
         logits = self.forward(x)
         return F.softmax(logits, dim=1)
+    
 
 class SNGP_ResFFN12_128(nn.Module):
     def __init__(self, input_size, output_size, lengthscale=0.4, outputscale=5.0, rank=512, dropout_rate=0.01):

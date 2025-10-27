@@ -2,8 +2,9 @@ import matplotlib.pyplot as plt # type: ignore
 from matplotlib.colors import LinearSegmentedColormap # type: ignore
 import numpy as np # type: ignore
 import torch # type: ignore
-import utils
+import src.utils
 from tqdm import tqdm
+import math
 
 def display_data(dataloader):
     X = []
@@ -175,51 +176,6 @@ def plot_probas_over_dense_grid(
     plt.gca().set_ylim(x2_lims)
     plt.show()
 
-# def plot_probabilities_gp(model, loader, covariance, num_samples=100):
-#    
-#     X_numpy, y_numpy = utils.get_data_from_loader(loader)
-#     xx, yy = np.meshgrid(np.arange(-20, 20, 0.5),
-#                          np.arange(-20, 20, 0.5))
-#     grid_points = torch.tensor(np.c_[xx.ravel(), yy.ravel()], dtype=torch.float32)
-
-#     # Loop over grid points and predict for each one (batch size=1)
-#     preds_list = []
-#     with torch.no_grad():
-#         for i in range(grid_points.shape[0]):
-#             x = grid_points[i]         # shape: [in_features]
-#             proba = model.predict_proba(x, covariance)
-#             proba = torch.nn.functional.softmax(proba, dim=-1)
-#             preds_list.append(proba.cpu())  # [1, num_classes]
-#     preds = torch.stack(preds_list, dim=0)
-#     print(preds.shape)
-#     
-#     class1_preds = preds[:, 1].numpy()
-#     predictions = class1_preds.reshape(xx.shape)
-
-#     colors = ['#1F77B4', '#5799C7', '#8FBBDA', '#C7DDED', '#FFFFFF',
-#               '#F5C9CA', '#EB9394', '#E15D5E', '#D62728']
-#     cmap = LinearSegmentedColormap.from_list('bwr', colors, N=256)
-#     fig, ax = plt.subplots(figsize=(8, 6))
-#     ax.scatter(X_numpy[:, 0][y_numpy == 0], X_numpy[:, 1][y_numpy == 0],
-#             color='#1F77B4', label='Class 0', s=6)
-#     ax.scatter(X_numpy[:, 0][y_numpy == 1], X_numpy[:, 1][y_numpy == 1],
-#             color='#D62728', label='Class 1', s=6)
-#     levels = np.linspace(0, 1, 256)
-#     contourf_obj = ax.contourf(xx, yy, predictions, levels=levels, alpha=0.9, cmap=cmap, antialiased=True)
-#     ax.set_xlim([-10, 10])
-#     ax.set_ylim([-10, 10])
-#     ax.set_xlabel(r'$x_1$')
-#     ax.set_ylabel(r'$x_2$')
-#     ax.legend()
-
-#     c_ticks = np.asarray([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
-#     left, bottom, width, height = ax.get_position().bounds
-#     cax = plt.gcf().add_axes([left + 1.2 * width, bottom, 0.03, height])
-#     boundaries = np.linspace(0, 1, 257)
-#     plt.colorbar(contourf_obj, orientation='vertical', cax=cax, ticks=c_ticks, boundaries=boundaries)
-#     plt.sca(ax)
-#     plt.show()
-
 def compute_probabilities_gp(model, loader, preds_filename='preds.pt', compute_covariance=True, device='cpu', num_samples=100):    
     xx, yy = np.meshgrid(np.arange(-4, 4, 0.05),
                          np.arange(-4, 4, 0.05))
@@ -241,8 +197,8 @@ def compute_probabilities_gp(model, loader, preds_filename='preds.pt', compute_c
     preds = preds.cpu()
     torch.save(preds, preds_filename)
 
-def plot_preds(preds_filename, loader, figure_filename):
-    X_numpy, y_numpy = utils.get_data_from_loader(loader)
+def plot_preds(preds_filename, loader, figure_filename, show_fig=False):
+    X_numpy, y_numpy = src.utils.get_data_from_loader(loader)
     xx, yy = np.meshgrid(np.arange(-4, 4, 0.05),
                          np.arange(-4, 4, 0.05))
     preds = torch.load(preds_filename, map_location=torch.device('cpu'))
@@ -280,11 +236,18 @@ def plot_preds(preds_filename, loader, figure_filename):
     ax2.set_title("Contour without Scatter")
     
     cbar2 = fig.colorbar(contourf_obj2, ax=ax2, ticks=c_ticks, orientation='vertical')
-    plt.savefig(figure_filename)
+    fig.tight_layout()
+
+    # Save BEFORE show/close
+    fig.savefig(figure_filename, dpi=300, bbox_inches='tight')
+    if show_fig:
+        plt.show()
+    plt.close(fig)
+
 
 
 def plot_probabilities_gp(model, train_loader, compute_covariance=True, device='cpu', num_samples=100, filename='plot_probabilities_gp.png'):
-    X_numpy, y_numpy = utils.get_data_from_loader(train_loader)
+    X_numpy, y_numpy = src.utils.get_data_from_loader(train_loader)
     
     xx, yy = np.meshgrid(np.arange(-4, 4, 0.05),
                          np.arange(-4, 4, 0.05))
@@ -309,96 +272,215 @@ def plot_probabilities_gp(model, train_loader, compute_covariance=True, device='
               '#F5C9CA', '#EB9394', '#E15D5E', '#D62728']
     cmap = LinearSegmentedColormap.from_list('bwr', colors, N=256)
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    contourf_obj1 = ax1.contourf(xx, yy, predictions, levels=np.linspace(0, 1, 256),
+    fig, ax = plt.subplots(figsize=(8, 6))
+    contourf_obj1 = ax.contourf(xx, yy, predictions, levels=np.linspace(0, 1, 256),
                                  alpha=0.9, cmap=cmap, antialiased=True)
-    ax1.scatter(X_numpy[:, 0][y_numpy == 0], X_numpy[:, 1][y_numpy == 0],
+    ax.scatter(X_numpy[:, 0][y_numpy == 0], X_numpy[:, 1][y_numpy == 0],
                 color='#1F77B4', label='Class 0', s=2)
-    ax1.scatter(X_numpy[:, 0][y_numpy == 1], X_numpy[:, 1][y_numpy == 1],
+    ax.scatter(X_numpy[:, 0][y_numpy == 1], X_numpy[:, 1][y_numpy == 1],
                 color='#D62728', label='Class 1', s=2)
-    ax1.set_xlim([-4, 4])
-    ax1.set_ylim([-4, 4])
-    ax1.set_xlabel(r'$x_1$')
-    ax1.set_ylabel(r'$x_2$')
-    ax1.set_title("Contour With Scatter")
+    ax.set_xlim([-4, 4])
+    ax.set_ylim([-4, 4])
+    ax.set_xlabel(r'$x_1$')
+    ax.set_ylabel(r'$x_2$')
+    ax.set_title("Contour With Scatter")
 
-    ax1.legend()
+    ax.legend()
     
     c_ticks = np.linspace(0, 1, 11)
-    cbar1 = fig.colorbar(contourf_obj1, ax=ax1, ticks=c_ticks, orientation='vertical')
+    cbar1 = fig.colorbar(contourf_obj1, ax=ax, ticks=c_ticks, orientation='vertical')
     
-    contourf_obj2 = ax2.contourf(xx, yy, predictions, levels=np.linspace(0, 1, 256),
-                                 alpha=0.9, cmap=cmap, antialiased=True)
-    ax2.set_xlim([-4, 4])
-    ax2.set_ylim([-4, 4])
-    ax2.set_xlabel(r'$x_1$')
-    ax2.set_ylabel(r'$x_2$')
-    ax2.set_title("Contour without Scatter")
-    
-    cbar2 = fig.colorbar(contourf_obj2, ax=ax2, ticks=c_ticks, orientation='vertical')
-    
-    plt.tight_layout()
-    plt.show()
-    plt.savefig(filename)
+    fig.tight_layout()
 
-def plot_thresholded_predictions(preds_file, train_loader, threshold=0.7, device='cpu'):
-    preds = torch.load(preds_file, map_location=device)
+    # Save BEFORE show/close
+    fig.savefig(filename, dpi=300, bbox_inches='tight')
+
+    plt.show()
+    plt.close(fig)
+
+
+# def plot_thresholded_predictions(preds_file, train_loader, threshold=0.7, device='cpu'):
+#     preds = torch.load(preds_file, map_location=device)
     
+#     num_grid_points = preds.shape[0]
+#     grid_size = int(np.sqrt(num_grid_points))
+#     if grid_size * grid_size != num_grid_points:
+#         raise ValueError("The number of prediction points is not a perfect square.")
+    
+#     x_lin = np.linspace(-4, 4, grid_size)
+#     y_lin = np.linspace(-4, 4, grid_size)
+#     xx, yy = np.meshgrid(x_lin, y_lin)
+    
+#     class1_preds = preds[:, 1].numpy()
+#     max_confidence = torch.max(preds, dim=1)[0].numpy()
+
+#     class1_preds_thresholded = class1_preds.copy()
+#     class1_preds_thresholded[max_confidence < threshold] = np.nan
+    
+#     predictions_thresholded = class1_preds_thresholded.reshape(xx.shape)
+    
+#     X_numpy, y_numpy = src.utils.get_data_from_loader(train_loader)
+    
+#     colors = ['#1F77B4', '#5799C7', '#8FBBDA', '#C7DDED', '#FFFFFF', '#F5C9CA', '#EB9394', '#E15D5E', '#D62728']
+#     cmap = LinearSegmentedColormap.from_list('bwr', colors, N=256)
+    
+#     fig, ax = plt.subplots(figsize=(8, 6))
+    
+#     contour1 = ax.contourf(xx, yy, predictions_thresholded, 
+#         levels=np.linspace(0, 1, 256), alpha=0.9, cmap=cmap, antialiased=True)
+#     ax.scatter(X_numpy[:, 0][y_numpy == 0], X_numpy[:, 1][y_numpy == 0],
+#         color='#1F77B4', label='Class 0', s=2)
+#     ax.scatter(X_numpy[:, 0][y_numpy == 1], X_numpy[:, 1][y_numpy == 1],
+#         color='#D62728', label='Class 1', s=2)
+#     ax.set_xlim([-4, 4])
+#     ax.set_ylim([-4, 4])
+#     ax.set_xlabel(r'$x_1$')
+#     ax.set_ylabel(r'$x_2$')
+#     ax.set_title(f"Throshold Contour w/ Data Points (Threshold: {threshold:.2f})")
+#     ax.legend()
+#     c_ticks = np.linspace(0, 1, 11)
+#     fig.colorbar(contour1, ax=ax, ticks=c_ticks, orientation='vertical')
+    
+#     plt.sca(ax)
+
+#     fig.tight_layout()
+
+#     fig.savefig(f"thresholded_predictions", dpi=300, bbox_inches='tight')
+
+#     plt.show()
+#     plt.close(fig)
+
+def plot_thresholded_predictions(
+    preds_file,
+    train_loader,
+    thresholds,
+    device='cpu',
+    filename='thresholded_predictions.png',
+):
+    """
+    thresholds: list of float thresholds, e.g. [0.5, 0.6, 0.7, 0.8]
+    We'll plot 4 subplots per row.
+    """
+
+    # ----- Load predictions over grid -----
+    preds = torch.load(preds_file, map_location=device)  # shape (M, K)
     num_grid_points = preds.shape[0]
     grid_size = int(np.sqrt(num_grid_points))
+
     if grid_size * grid_size != num_grid_points:
         raise ValueError("The number of prediction points is not a perfect square.")
-    
+
+    # Make the grid coordinates in the SAME order you used to generate preds
     x_lin = np.linspace(-4, 4, grid_size)
     y_lin = np.linspace(-4, 4, grid_size)
     xx, yy = np.meshgrid(x_lin, y_lin)
-    
-    class1_preds = preds[:, 1].numpy()
-    max_confidence = torch.max(preds, dim=1)[0].numpy()
 
-    class1_preds_thresholded = class1_preds.copy()
-    class1_preds_thresholded[max_confidence < threshold] = np.nan
-    
-    predictions_thresholded = class1_preds_thresholded.reshape(xx.shape)
-    
-    X_numpy, y_numpy = utils.get_data_from_loader(train_loader)
-    
-    colors = ['#1F77B4', '#5799C7', '#8FBBDA', '#C7DDED', '#FFFFFF', '#F5C9CA', '#EB9394', '#E15D5E', '#D62728']
+    # Extract per-class probs and max confidence
+    class1_preds = preds[:, 1].cpu().numpy()  # (M,)
+    max_confidence = torch.max(preds, dim=1)[0].cpu().numpy()  # (M,)
+
+    # Training data for scatter overlay
+    X_numpy, y_numpy = src.utils.get_data_from_loader(train_loader)
+
+    # Colormap
+    colors = [
+        '#1F77B4', '#5799C7', '#8FBBDA', '#C7DDED', '#FFFFFF',
+        '#F5C9CA', '#EB9394', '#E15D5E', '#D62728'
+    ]
     cmap = LinearSegmentedColormap.from_list('bwr', colors, N=256)
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    contour1 = ax1.contourf(xx, yy, predictions_thresholded, 
-        levels=np.linspace(0, 1, 256), alpha=0.9, cmap=cmap, antialiased=True)
-    ax1.scatter(X_numpy[:, 0][y_numpy == 0], X_numpy[:, 1][y_numpy == 0],
-        color='#1F77B4', label='Class 0', s=2)
-    ax1.scatter(X_numpy[:, 0][y_numpy == 1], X_numpy[:, 1][y_numpy == 1],
-        color='#D62728', label='Class 1', s=2)
-    ax1.set_xlim([-4, 4])
-    ax1.set_ylim([-4, 4])
-    ax1.set_xlabel(r'$x_1$')
-    ax1.set_ylabel(r'$x_2$')
-    ax1.set_title(f"Throshold Contour w/ Data Points (Threshold: {threshold:.2f})")
-    ax1.legend()
+
+    # ----- Figure layout -----
+    n_thresh = len(thresholds)
+    ncols = 4
+    nrows = math.ceil(n_thresh / ncols)
+
+    fig, axes = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(4 * ncols, 4 * nrows),
+        squeeze=False,
+    )
+
+    # We'll reuse these settings for axes limits / labels
+    xlim = (-4, 4)
+    ylim = (-4, 4)
     c_ticks = np.linspace(0, 1, 11)
-    fig.colorbar(contour1, ax=ax1, ticks=c_ticks, orientation='vertical')
-    
-    contour2 = ax2.contourf(xx, yy, predictions_thresholded, 
-        levels=np.linspace(0, 1, 256), alpha=0.9, cmap=cmap, antialiased=True)
-    ax2.set_xlim([-4, 4])
-    ax2.set_ylim([-4, 4])
-    ax2.set_xlabel(r'$x_1$')
-    ax2.set_ylabel(r'$x_2$')
-    ax2.set_title(f"Thresholded Contour (Threshold: {threshold:.2f})")
-    fig.colorbar(contour2, ax=ax2, ticks=c_ticks, orientation='vertical')
-    
-    plt.tight_layout()
+    levels = np.linspace(0, 1, 256)
+
+    for idx, thr in enumerate(thresholds):
+        row = idx // ncols
+        col = idx % ncols
+        ax = axes[row][col]
+
+        # Threshold mask
+        mask = class1_preds.copy()
+        mask[max_confidence < thr] = np.nan  # hide low-confidence regions
+        mask_2d = mask.reshape(xx.shape)
+
+        # Contourf of class-1 probability, masked by confidence
+        contour = ax.contourf(
+            xx, yy, mask_2d,
+            levels=levels,
+            alpha=0.9,
+            cmap=cmap,
+            antialiased=True,
+        )
+
+        # Overlay training scatter
+        ax.scatter(
+            X_numpy[:, 0][y_numpy == 0],
+            X_numpy[:, 1][y_numpy == 0],
+            color='#1F77B4',
+            label='Class 0',
+            s=4,
+        )
+        ax.scatter(
+            X_numpy[:, 0][y_numpy == 1],
+            X_numpy[:, 1][y_numpy == 1],
+            color='#D62728',
+            label='Class 1',
+            s=4,
+        )
+
+        # Style
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_xlabel(r'$x_1$')
+        ax.set_ylabel(r'$x_2$')
+        ax.set_title(f"Threshold {thr:.2f}")
+        ax.legend(fontsize=8, loc='lower right')
+
+        # Add a colorbar for THIS subplot (right next to it)
+        # Slightly smaller colorbar to avoid blowing up layout.
+        cbar = fig.colorbar(
+            contour,
+            ax=ax,
+            ticks=c_ticks,
+            orientation='vertical',
+            fraction=0.046,    # shrink colorbar box size
+            pad=0.04           # gap between plot & bar
+        )
+        cbar.ax.tick_params(labelsize=8)
+
+    # Hide any unused subplots (if thresholds not multiple of 4)
+    for empty_idx in range(n_thresh, nrows * ncols):
+        row = empty_idx // ncols
+        col = empty_idx % ncols
+        axes[row][col].axis('off')
+
+    fig.tight_layout()
+
+    # Save BEFORE show/close
+    fig.savefig(filename, dpi=300, bbox_inches='tight')
+
     plt.show()
-    plt.savefig(f'threshold_{threshold:.2f}.png')
+    plt.close(fig)
+
+    return filename
 
 def plot_probabilities(model, loader, device='cpu', filename='plot_probabilities.png'):
     # Get the data for plotting (assumed to be numpy arrays)
-    X_numpy, y_numpy = utils.get_data_from_loader(loader)
+    X_numpy, y_numpy = src.utils.get_data_from_loader(loader)
     
     # Create a grid for predictions
     xx, yy = np.meshgrid(np.arange(-10, 10, 0.05),
@@ -446,7 +528,13 @@ def plot_probabilities(model, loader, device='cpu', filename='plot_probabilities
     boundaries = np.linspace(0, 1, 257)
     plt.colorbar(contourf_obj, orientation='vertical', cax=cax, ticks=c_ticks, boundaries=boundaries)
     plt.sca(ax)
+    fig.tight_layout()
+
+    # Save BEFORE show/close
+    fig.savefig(filename, dpi=300, bbox_inches='tight')
+
     plt.show()
-    plt.savefig(filename)
+    plt.close(fig)
+
 
 

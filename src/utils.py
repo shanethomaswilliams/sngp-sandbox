@@ -2,7 +2,7 @@ import torch # type: ignore
 import torch.nn as nn # type: ignore
 import torch.nn.functional as F # type: ignore
 import math
-import losses
+import src.losses
 import tqdm # type: ignore
 from sklearn.datasets import make_moons # type: ignore
 from sklearn import metrics # type: ignore
@@ -10,7 +10,7 @@ import torch # type: ignore
 from torch.utils.data import TensorDataset, DataLoader # type: ignore
 import numpy as np # type: ignore
 
-def train_model(model, device, tr_loader, va_loader, loss_module,
+def train_model(model, device, tr_loader, va_loader, loss_module, optimizer=None,
                 n_epochs=10, lr=0.001, l2pen_mag=0.0, data_order_seed=42,
                 model_filename='best_model.pth',
                 do_early_stopping=True,
@@ -29,13 +29,15 @@ def train_model(model, device, tr_loader, va_loader, loss_module,
         Contains history of this training run, for diagnostics/plotting
     '''
     # Make sure tr_loader shuffling reproducible
-    torch.manual_seed(data_order_seed)      
-    torch.cuda.manual_seed(data_order_seed)
+    torch.manual_seed(data_order_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(data_order_seed)
     model.to(device)
     
-    optimizer = torch.optim.SGD(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=lr)
+    if optimizer is None:
+        optimizer = torch.optim.SGD(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=lr)
 
     # Allocate lists for tracking progress each epoch
     tr_info = {'xent':[], 'err':[], 'loss':[]}

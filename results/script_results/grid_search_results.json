@@ -1,0 +1,10 @@
+[
+    {
+        "outputscale": 1.0,
+        "lengthscale": 0.1,
+        "learning_rate": 0.5,
+        "final_loss": 0.48066630045572917,
+        "pred_file": "/cluster/tufts/hugheslab/swilli26/SNGP-IMPLEMENTATION/results/preds/preds_os1.0_ls0.1_lr0.5.pt",
+        "fig_filename": "/cluster/tufts/hugheslab/swilli26/SNGP-IMPLEMENTATION/results/plots/plots_os1.0_ls0.1_lr0.5.png"
+    }
+]

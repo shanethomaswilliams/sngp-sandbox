@@ -1,7 +1,7 @@
 import torch # type: ignore
 import torch.nn # type: ignore
 import numpy as np # type: ignore
-import utils
+import src.utils
 
 METHOD_TYPE = 'supervised'
 
@@ -18,6 +18,6 @@ def calc_xent_loss_with_l2(logits_BC, y_B, model, l2pen_mag, batch_size, reducti
     ce_loss = calc_xent_loss_base2(logits_BC, y_B, reduction=reduction)
     l2_loss = 0.0
     if l2pen_mag > 0:
-        params = utils.flatten_params(model)
+        params = src.utils.flatten_params(model)
         l2_loss = l2pen_mag * torch.sum(params ** 2) / batch_size
     return ce_loss + l2_loss
